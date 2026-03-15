@@ -1,7 +1,5 @@
-<<<<<<< HEAD
+
 # AI-Negotiation-for-car-lease-or-loan
-=======
-# Car Contract AI
 
 ## Prerequisites
   sudo apt install poppler-utils -y
@@ -34,4 +32,4 @@
 ## URLs
   App:      http://localhost:5173
   API docs: http://localhost:8000/docs
->>>>>>> 9680589 (first commit)
+
