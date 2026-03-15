@@ -9,14 +9,14 @@
  */
 import { useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router-dom";
-import { useAuthStore } from "../store/authStore";
+import { isAccessTokenValid, useAuthStore } from "../store/authStore";
 
 export default function ProtectedRoute() {
   const { isAuthenticated, accessToken, refreshAccessToken } = useAuthStore();
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (accessToken) {
+    if (isAccessTokenValid(accessToken)) {
       // Token already in memory — no network call needed
       setChecking(false);
       return;

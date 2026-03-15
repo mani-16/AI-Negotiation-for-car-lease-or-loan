@@ -12,7 +12,7 @@
  */
 import axios, { AxiosRequestConfig } from "axios";
 import { UserRead } from "../types";
-import { useAuthStore } from "../store/authStore";
+import { isAccessTokenValid, useAuthStore } from "../store/authStore";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -24,8 +24,14 @@ export const axiosInstance = axios.create({
 // ── Request interceptor — attach in-memory access token ──────────────────────
 axiosInstance.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
-  if (token) {
+  if (isAccessTokenValid(token)) {
     config.headers.Authorization = `Bearer ${token}`;
+  } else if (token) {
+    useAuthStore.setState({
+      accessToken: null,
+      user: null,
+      isAuthenticated: false,
+    });
   }
   return config;
 });

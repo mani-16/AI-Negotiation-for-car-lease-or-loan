@@ -11,6 +11,31 @@ import { UserRead } from "../types";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+
+    // JWT payload uses base64url encoding.
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function isAccessTokenValid(token: string | null): boolean {
+  if (!token) return false;
+
+  const payload = decodeJwtPayload(token);
+  const exp = payload?.exp;
+  if (typeof exp !== "number") return false;
+
+  // Small clock-skew buffer avoids edge-case flicker around exact expiry.
+  return Date.now() < exp * 1000 - 5000;
+}
+
 interface AuthState {
   accessToken: string | null;
   user: UserRead | null;

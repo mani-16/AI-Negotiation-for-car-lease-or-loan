@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useAuthStore } from "./store/authStore";
+import { isAccessTokenValid, useAuthStore } from "./store/authStore";
 import { useThemeStore } from "./store/themeStore";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LandingPage from "./pages/LandingPage";
@@ -25,7 +25,7 @@ function RootRedirect() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (accessToken) {
+    if (isAccessTokenValid(accessToken)) {
       setChecking(false);
       return;
     }
