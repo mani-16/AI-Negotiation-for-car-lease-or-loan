@@ -16,10 +16,8 @@ from datetime import datetime, timezone, timedelta
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
-from passlib.context import CryptContext
 from app.models.models import User, PasswordResetToken
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from app.core.security import hash_password
 
 RESET_TOKEN_EXPIRE_MINUTES = 30
 
@@ -162,7 +160,7 @@ async def reset_password(
     return False
 
   # Hash new password and save
-  user.hashed_password = pwd_context.hash(new_password)
+  user.hashed_password = hash_password(new_password)
 
   # Delete ALL reset tokens for this user (single use)
   await db.execute(

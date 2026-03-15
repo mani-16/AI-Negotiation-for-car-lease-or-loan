@@ -2,7 +2,7 @@ services:
   - type: web
     name: contract-ai-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: apt-get update && apt-get install -y tesseract-ocr poppler-utils && pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -17,11 +17,17 @@ services:
         sync: false
       - key: QDRANT_API_KEY
         sync: false
-      - key: RESEND_API_KEY
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
         sync: false
       - key: ADMIN_EMAIL
         sync: false
       - key: FRONTEND_URL
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: GOOGLE_CLOUD_CREDENTIALS_JSON
         sync: false
       - key: COOKIE_SECURE
         value: "true"

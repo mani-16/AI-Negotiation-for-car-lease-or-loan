@@ -24,9 +24,10 @@ class Settings(BaseSettings):
 
   QDRANT_URL: str = ""
   QDRANT_API_KEY: str = ""
-  RESEND_API_KEY: str = ""
-  RESEND_FROM_EMAIL: str = "onboarding@resend.dev"
+  BREVO_API_KEY: str = ""
+  EMAIL_FROM: str = "noreply@example.com"
   FRONTEND_URL: str = "http://localhost:5173"
+  APP_BASE_URL: str = "http://localhost:8000"
   ADMIN_EMAIL: str = ""
 
   # Render sets PORT env var

@@ -21,7 +21,7 @@ from qdrant_client.models import (
     PointStruct, Filter,
     FieldCondition, MatchValue,
 )
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from app.core.config import settings
 
 COLLECTION_NAME = "car_contract_chunks"
@@ -36,9 +36,9 @@ class VectorService:
             url=settings.QDRANT_URL,
             api_key=settings.QDRANT_API_KEY,
         )
-        # Load embedding model once — cached after first load
-        # 80MB download on first run, then cached locally
-        self.encoder = SentenceTransformer("all-MiniLM-L6-v2")
+        # Load embedding model once — uses ONNX Runtime (lightweight, no PyTorch)
+        # ~100MB download on first run, then cached locally
+        self.encoder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
         self._embedded_threads: set = set()  # ADD THIS LINE
         self._ensure_collection()
 
@@ -165,11 +165,7 @@ class VectorService:
             return
 
         # Embed all chunks in one batch call (faster than one by one)
-        embeddings = self.encoder.encode(
-            chunks,
-            batch_size=32,
-            show_progress_bar=False,
-        )
+        embeddings = list(self.encoder.embed(chunks))
 
         # Build Qdrant points
         points = []
@@ -218,7 +214,7 @@ class VectorService:
             self._ensure_collection()
 
             # Embed the user query
-            query_vector = self.encoder.encode(query).tolist()
+            query_vector = list(self.encoder.embed([query]))[0].tolist()
 
             # Search Qdrant with thread_id filter
             results = self.client.search(

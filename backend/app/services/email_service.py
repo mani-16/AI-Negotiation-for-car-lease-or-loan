@@ -1,10 +1,10 @@
 """
-Email service using Resend.
-Sends password reset emails.
+Email service using Brevo (formerly Sendinblue).
+Sends password reset emails via Brevo SMTP API.
 Never raises — email failure is logged,
 not propagated to user.
 """
-import resend
+import httpx
 from app.core.config import settings
 
 def _get_reset_email_html(reset_url: str) -> str:
@@ -42,7 +42,7 @@ def _get_reset_email_html(reset_url: str) -> str:
                              border-radius:10px;
                              padding:10px 14px;
                              font-size:20px;">
-                    📄
+                    &#128196;
                   </td>
                   <td style="padding-left:12px;">
                     <span style="color:#ffffff;
@@ -96,7 +96,7 @@ def _get_reset_email_html(reset_url: str) -> str:
                               font-size:15px;
                               font-weight:600;
                               text-decoration:none;">
-                      Reset Password →
+                      Reset Password &#8594;
                     </a>
                   </td>
                 </tr>
@@ -124,7 +124,7 @@ def _get_reset_email_html(reset_url: str) -> str:
                           color:#64748b;
                           font-size:13px;
                           line-height:1.6;">
-                  🔒 If you did not request a password
+                  &#128274; If you did not request a password
                   reset, you can safely ignore this email.
                   Your password will not change.
                 </p>
@@ -140,7 +140,7 @@ def _get_reset_email_html(reset_url: str) -> str:
                         color:#475569;
                         font-size:12px;
                         text-align:center;">
-                Contract AI · This is an automated email,
+                Contract AI - This is an automated email,
                 please do not reply.
               </p>
             </td>
@@ -159,22 +159,20 @@ def send_password_reset_email(
   reset_token: str,
 ) -> bool:
   """
-  Send password reset email via Resend.
+  Send password reset email via Brevo SMTP API.
   SYNC function — safe for BackgroundTasks.
   Returns True if sent, False if failed.
   Never raises.
   """
   try:
-    if not settings.RESEND_API_KEY:
+    if not settings.BREVO_API_KEY:
       print(
-        "[Email] RESEND_API_KEY not set — skipping\n"
+        "[Email] BREVO_API_KEY not set — skipping\n"
         f"[Email] Token for testing: {reset_token}\n"
         f"[Email] Reset URL: {settings.FRONTEND_URL}"
         f"/reset-password?token={reset_token}"
       )
       return False
-
-    resend.api_key = settings.RESEND_API_KEY
 
     reset_url = (
       f"{settings.FRONTEND_URL}"
@@ -184,21 +182,35 @@ def send_password_reset_email(
     print(f"[Email] Sending reset email to {to_email}")
     print(f"[Email] Reset URL: {reset_url}")
 
-    params = {
-      "from": settings.RESEND_FROM_EMAIL,
-      "to": [to_email],
+    payload = {
+      "sender": {
+        "name": "Contract AI",
+        "email": settings.EMAIL_FROM,
+      },
+      "to": [{"email": to_email}],
       "subject": "Reset your Contract AI password",
-      "html": _get_reset_email_html(reset_url),
+      "htmlContent": _get_reset_email_html(reset_url),
     }
 
-    response = resend.Emails.send(params)
+    response = httpx.post(
+      "https://api.brevo.com/v3/smtp/email",
+      headers={
+        "api-key": settings.BREVO_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      json=payload,
+      timeout=15,
+    )
+    response.raise_for_status()
+    result = response.json()
+
     print(
-      f"[Email] ✓ Sent to {to_email} "
-      f"id={response.get('id', 'unknown')}"
+      f"[Email] Sent to {to_email} "
+      f"messageId={result.get('messageId', 'unknown')}"
     )
     return True
 
   except Exception as e:
-    print(f"[Email] ✗ Failed: {e}")
-    print(f"[Email] Check: is {to_email} verified in Resend?")
+    print(f"[Email] Failed: {e}")
     return False
