@@ -18,6 +18,13 @@ logger = logging.getLogger("app.startup")
 request_logger = logging.getLogger("app.request")
 error_logger = logging.getLogger("app.error")
 
+frontend_origin = settings.FRONTEND_URL.rstrip("/")
+cors_origins = list(filter(None, {
+    frontend_origin,
+    "http://localhost:5173",
+    "http://localhost:3000",
+}))
+
 async def recover_stuck_documents():
     """
     On startup: find ALL documents stuck in 'processing' or
@@ -61,12 +68,17 @@ async def recover_stuck_documents():
 async def startup():
     init_db(settings.DATABASE_URL)
     logger.info(
-        "startup config: frontend_url=%s app_base_url=%s cookie_secure=%s cookie_samesite=%s",
+        "startup config: frontend_url_raw=%s frontend_url_normalized=%s app_base_url=%s cookie_secure=%s cookie_samesite=%s",
         settings.FRONTEND_URL,
+        frontend_origin,
         settings.APP_BASE_URL,
         settings.COOKIE_SECURE,
         settings.COOKIE_SAMESITE,
     )
+    if settings.COOKIE_SAMESITE.lower() == "none" and not settings.COOKIE_SECURE:
+        logger.warning(
+            "cookie config warning: COOKIE_SAMESITE=none with COOKIE_SECURE=false; browsers will reject refresh cookie over HTTPS"
+        )
     await recover_stuck_documents()
 
 
@@ -131,11 +143,7 @@ app.add_middleware(
     CORSMiddleware,
     # allow_origins=["*"] is incompatible with allow_credentials=True.
     # List every frontend origin explicitly.
-    allow_origins=list(filter(None, {
-        settings.FRONTEND_URL,          # e.g. https://your-ap
-        "http://localhost:5173",         # Vite dev server
-        "http://localhost:3000",         # CRA / Next dev server (if used)
-    })),
+    allow_origins=cors_origins,
     allow_credentials=True,             # needed for HTTP-only cookie
     allow_methods=["*"],
     allow_headers=["*"],
