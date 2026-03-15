@@ -1,10 +1,22 @@
-from fastapi import FastAPI
+import time
+import logging
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from app.core.database import init_db
 from app.core.config import settings
 from app.api import auth, documents, chat, vin, compare, admin
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+
 app = FastAPI(title="Car Contract AI", version="1.0.0")
+logger = logging.getLogger("app.startup")
+request_logger = logging.getLogger("app.request")
+error_logger = logging.getLogger("app.error")
 
 async def recover_stuck_documents():
     """
@@ -48,14 +60,79 @@ async def recover_stuck_documents():
 @app.on_event("startup")
 async def startup():
     init_db(settings.DATABASE_URL)
+    logger.info(
+        "startup config: frontend_url=%s app_base_url=%s cookie_secure=%s cookie_samesite=%s",
+        settings.FRONTEND_URL,
+        settings.APP_BASE_URL,
+        settings.COOKIE_SECURE,
+        settings.COOKIE_SAMESITE,
+    )
     await recover_stuck_documents()
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        request_logger.info(
+            "%s %s -> %s (%.1f ms)",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+        )
+        return response
+    except Exception:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        error_logger.exception(
+            "unhandled request error: %s %s (%.1f ms)",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+        )
+        raise
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_logger.warning(
+        "http error: %s %s -> %s detail=%s",
+        request.method,
+        request.url.path,
+        exc.status_code,
+        exc.detail,
+    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    request_logger.warning(
+        "validation error: %s %s errors=%s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    error_logger.exception(
+        "unhandled exception: %s %s",
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=["*"] is incompatible with allow_credentials=True.
     # List every frontend origin explicitly.
     allow_origins=list(filter(None, {
-        settings.FRONTEND_URL,          # e.g. https://your-app.vercel.app
+        settings.FRONTEND_URL,          # e.g. https://your-ap
         "http://localhost:5173",         # Vite dev server
         "http://localhost:3000",         # CRA / Next dev server (if used)
     })),

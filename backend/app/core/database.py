@@ -3,6 +3,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import declarative_base
 import ssl as _ssl
+import logging
+
+logger = logging.getLogger("app.database")
 
 # Base is defined here alone — no engine creation on import
 # Engine is only created when init_db() is called from main.py
@@ -26,23 +29,28 @@ def init_db(database_url: str):
     connect_args["command_timeout"] = 10
     connect_args["server_settings"] = {"application_name": "contract_ai"}
 
-    engine = create_async_engine(
-        database_url,
-        echo=False,
-        pool_size=3,
-        max_overflow=5,
-        pool_timeout=30,
-        pool_recycle=300,      # recycle every 5min
-        pool_pre_ping=True,    # ping before each use
-        connect_args=connect_args,
-    )
-    AsyncSessionLocal = async_sessionmaker(
-        bind=engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
-    )
+    try:
+        engine = create_async_engine(
+            database_url,
+            echo=False,
+            pool_size=3,
+            max_overflow=5,
+            pool_timeout=30,
+            pool_recycle=300,      # recycle every 5min
+            pool_pre_ping=True,    # ping before each use
+            connect_args=connect_args,
+        )
+        AsyncSessionLocal = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+        logger.info("database initialized successfully")
+    except Exception:
+        logger.exception("database init failed")
+        raise
 
 async def get_db():
     async with AsyncSessionLocal() as session:
@@ -51,6 +59,7 @@ async def get_db():
             await session.commit()
         except Exception:
             await session.rollback()
+            logger.exception("database session rollback due to error")
             raise
         finally:
             await session.close()

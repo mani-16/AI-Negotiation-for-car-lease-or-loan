@@ -1,10 +1,12 @@
 import hashlib
+import logging
 import uuid as _uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -29,6 +31,7 @@ from app.services.email_service import send_password_reset_email
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger("app.auth")
 
 # ── Cookie name constant ──────────────────────────────────────────────────────
 REFRESH_COOKIE = "refresh_token"
@@ -104,19 +107,31 @@ async def _purge_expired_tokens(db: AsyncSession, user_id: UUID) -> None:
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(data: UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == data.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
+    email = data.email.strip().lower()
+    try:
+        result = await db.execute(select(User).where(User.email == email))
+        if result.scalar_one_or_none():
+            logger.info("register rejected: duplicate email=%s", email)
+            raise HTTPException(status_code=400, detail="Email already registered")
 
-    user = User(
-        email=data.email,
-        hashed_password=hash_password(data.password),
-        full_name=data.full_name,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+        user = User(
+            email=email,
+            hashed_password=hash_password(data.password),
+            full_name=data.full_name,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        logger.info("register success: user_id=%s email=%s", user.user_id, email)
+        return user
+    except IntegrityError:
+        await db.rollback()
+        logger.exception("register integrity error: email=%s", email)
+        raise HTTPException(status_code=400, detail="Email already registered")
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception("register database error: email=%s", email)
+        raise HTTPException(status_code=500, detail="Database error during registration")
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
@@ -132,26 +147,37 @@ async def login(
     • Returns short-lived access token in the JSON body.
     • Sets long-lived refresh token in an HTTP-only cookie.
     """
-    result = await db.execute(select(User).where(User.email == form.username))
-    user = result.scalar_one_or_none()
-    if not user or not verify_password(form.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    email = form.username.strip().lower()
+    try:
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+        if not user or not verify_password(form.password, user.hashed_password):
+            logger.info("login rejected: invalid credentials email=%s", email)
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account is inactive")
+        if not user.is_active:
+            logger.info("login rejected: inactive user_id=%s", user.user_id)
+            raise HTTPException(status_code=403, detail="Account is inactive")
 
-    jti = str(_uuid.uuid4())
-    access_token = create_access_token({"sub": str(user.user_id), "jti": jti})
-    refresh_token = create_refresh_token(
-        {"sub": str(user.user_id), "jti": str(_uuid.uuid4())}
-    )
+        jti = str(_uuid.uuid4())
+        access_token = create_access_token({"sub": str(user.user_id), "jti": jti})
+        refresh_token = create_refresh_token(
+            {"sub": str(user.user_id), "jti": str(_uuid.uuid4())}
+        )
 
-    # Persist refresh token hash & set cookie
-    await _purge_expired_tokens(db, user.user_id)
-    await _store_refresh_token(db, user.user_id, refresh_token)
-    _set_refresh_cookie(response, refresh_token)
+        # Persist refresh token hash & set cookie
+        await _purge_expired_tokens(db, user.user_id)
+        await _store_refresh_token(db, user.user_id, refresh_token)
+        _set_refresh_cookie(response, refresh_token)
 
-    return {"access_token": access_token, "token_type": "bearer", "user": user}
+        logger.info("login success: user_id=%s email=%s", user.user_id, email)
+        return {"access_token": access_token, "token_type": "bearer", "user": user}
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.exception("login database error: email=%s", email)
+        raise HTTPException(status_code=500, detail="Database error during login")
 
 
 # ── Refresh ───────────────────────────────────────────────────────────────────
@@ -169,6 +195,7 @@ async def refresh(
     """
     refresh_token = request.cookies.get(REFRESH_COOKIE)
     if not refresh_token:
+        logger.info("refresh rejected: no refresh cookie")
         raise HTTPException(status_code=401, detail="No refresh token")
 
     # 1. Verify JWT signature and expiry
@@ -186,6 +213,7 @@ async def refresh(
     if not db_token:
         # Possible token reuse attack — clear the cookie too
         _clear_refresh_cookie(response)
+        logger.info("refresh rejected: token missing/revoked/expired")
         raise HTTPException(
             status_code=401, detail="Refresh token invalid, expired or already used"
         )
@@ -205,6 +233,7 @@ async def refresh(
     if not user:
         await db.commit()
         _clear_refresh_cookie(response)
+        logger.info("refresh rejected: user missing or inactive")
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
     # 5. Issue new token pair
@@ -227,6 +256,7 @@ async def refresh(
     await db.commit()
 
     _set_refresh_cookie(response, new_refresh_token)
+    logger.info("refresh success: user_id=%s", user.user_id)
 
     return {
         "access_token": new_access_token,

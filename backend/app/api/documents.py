@@ -2,6 +2,7 @@
 Documents API router.
 Handles: upload, status polling, list, detail, delete, retry SLA.
 """
+import logging
 
 from fastapi import (
     APIRouter, Depends, HTTPException,
@@ -28,6 +29,7 @@ from app.services.document_service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("app.documents")
 
 # ─── ALLOWED MIME TYPES ───────────────────────────────────────────────
 ALLOWED_MIME_TYPES = {
@@ -122,8 +124,9 @@ async def process_document(
                             f"Please re-upload in a different format "
                             f"(e.g. native PDF or DOCX)."
                         )
-                        print(
-                            f"[Doc] Extraction failed for {doc_id}: {e}"
+                        logger.exception(
+                            "document extraction failed: doc_id=%s",
+                            doc_id,
                         )
                     else:
                         # Extraction completed but something else
@@ -186,7 +189,13 @@ async def _run_sla_extraction(
                 "total": total,
                 "message": msg
             }
-            print(f"[SLA] Progress {current}/{total}: {msg}")
+            logger.info(
+                "sla progress: doc_id=%s step=%s/%s message=%s",
+                doc_id,
+                current,
+                total,
+                msg,
+            )
 
         # Set the callback and run
         sla_service._progress_callback = progress_callback
@@ -222,7 +231,7 @@ async def _run_sla_extraction(
         # Status is now "ready"
 
     except _asyncio.TimeoutError:
-        print(f"[SLA] Overall extraction timed out for doc {doc_id}")
+        logger.warning("sla timeout: doc_id=%s", doc_id)
         doc_check = await db.execute(
             select(Document).where(Document.doc_id == doc_id)
         )
@@ -236,9 +245,11 @@ async def _run_sla_extraction(
         )
 
     except SLAExtractionError as e:
-        print(
-            f"[SLA] Extraction failed for doc {doc_id}: "
-            f"{e.reason} — {e.detail}"
+        logger.warning(
+            "sla extraction failed: doc_id=%s reason=%s detail=%s",
+            doc_id,
+            e.reason,
+            e.detail,
         )
         # Check document still exists before updating
         doc_check = await db.execute(
@@ -254,7 +265,7 @@ async def _run_sla_extraction(
         )
 
     except Exception as e:
-        print(f"[SLA] Unexpected error for doc {doc_id}: {e}")
+        logger.exception("sla unexpected error: doc_id=%s", doc_id)
         try:
             await increment_sla_retry(db, doc_id)
             await update_document_status(
@@ -478,7 +489,7 @@ async def retry_sla_extraction(
     )
 
     # Run SLA extraction INLINE — not as background task
-    print(f"[SLA] Starting inline retry for doc {doc_id}")
+    logger.info("sla inline retry started: doc_id=%s", doc_id)
     await _run_sla_extraction(db, doc_id, doc.raw_extracted_text)
 
     # Re-fetch the document to get updated status
