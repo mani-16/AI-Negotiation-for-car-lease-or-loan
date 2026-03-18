@@ -19,9 +19,20 @@ logger = logging.getLogger("app.startup")
 request_logger = logging.getLogger("app.request")
 error_logger = logging.getLogger("app.error")
 
-frontend_origin = settings.FRONTEND_URL.rstrip("/")
+frontend_origins = [
+    origin.strip().rstrip("/")
+    for origin in settings.FRONTEND_URL.split(",")
+    if origin.strip()
+]
+frontend_origin = frontend_origins[0] if frontend_origins else ""
+additional_origins = [
+    origin.strip().rstrip("/")
+    for origin in settings.CORS_ADDITIONAL_ORIGINS.split(",")
+    if origin.strip()
+]
 cors_origins = list(filter(None, {
-    frontend_origin,
+    *frontend_origins,
+    *additional_origins,
     "http://localhost:5173",
     "http://localhost:3000",
 }))
@@ -71,9 +82,11 @@ async def recover_stuck_documents():
 async def startup():
     init_db(settings.DATABASE_URL)
     logger.info(
-        "startup config: frontend_url_raw=%s frontend_url_normalized=%s app_base_url=%s cookie_secure=%s cookie_samesite=%s",
+        "startup config: frontend_url_raw=%s frontend_url_normalized=%s cors_additional_origins=%s cors_allow_origin_regex=%s app_base_url=%s cookie_secure=%s cookie_samesite=%s",
         settings.FRONTEND_URL,
-        frontend_origin,
+        frontend_origins,
+        additional_origins,
+        settings.CORS_ALLOW_ORIGIN_REGEX,
         settings.APP_BASE_URL,
         settings.COOKIE_SECURE,
         settings.COOKIE_SAMESITE,
@@ -148,6 +161,7 @@ app.add_middleware(
     # allow_origins=["*"] is incompatible with allow_credentials=True.
     # List every frontend origin explicitly.
     allow_origins=cors_origins,
+    allow_origin_regex=settings.CORS_ALLOW_ORIGIN_REGEX or None,
     allow_credentials=True,             # needed for HTTP-only cookie
     allow_methods=["*"],
     allow_headers=["*"],

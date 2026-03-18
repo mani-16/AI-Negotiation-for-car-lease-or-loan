@@ -27,6 +27,8 @@ class Settings(BaseSettings):
   BREVO_API_KEY: str = ""
   EMAIL_FROM: str = "noreply@example.com"
   FRONTEND_URL: str = "http://localhost:5173"
+  CORS_ADDITIONAL_ORIGINS: str = ""
+  CORS_ALLOW_ORIGIN_REGEX: str = ""
   APP_BASE_URL: str = "http://localhost:8000"
   ADMIN_EMAIL: str = ""
 
