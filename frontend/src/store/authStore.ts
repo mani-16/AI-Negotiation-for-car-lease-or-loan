@@ -9,7 +9,10 @@
 import { create } from "zustand";
 import { UserRead } from "../types";
 
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
