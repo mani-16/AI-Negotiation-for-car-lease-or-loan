@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import { useAuthStore } from "../store/authStore";
+import { API_BASE_URL } from "../config/apiBaseUrl";
 import SLAViewer from "../components/SLAViewer";
 
 interface Message {
@@ -195,9 +196,8 @@ export default function NegotiationChatPage() {
 
     try {
       const accessToken = useAuthStore.getState().accessToken;
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-      const response = await fetch(`${API_URL}/chat/message`, {
+      const response = await fetch(`${API_BASE_URL}/chat/message`, {
         method: "POST",
         credentials: "include",
         headers: {

@@ -13,11 +13,9 @@
 import axios, { AxiosRequestConfig } from "axios";
 import { UserRead } from "../types";
 import { isAccessTokenValid, useAuthStore } from "../store/authStore";
+import { API_BASE_URL } from "../config/apiBaseUrl";
 
-const BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+const BASE_URL = API_BASE_URL;
 
 export const axiosInstance = axios.create({
   baseURL: BASE_URL,
