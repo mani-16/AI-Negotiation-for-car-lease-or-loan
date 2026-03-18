@@ -3,6 +3,10 @@ services:
     name: contract-ai-backend
     runtime: docker
     dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    healthCheckInterval: 15
+    healthCheckTimeoutSeconds: 10
+    healthCheckStartupFailureThresholdCount: 10
     envVars:
       - key: DATABASE_URL
         sync: false

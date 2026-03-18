@@ -35,14 +35,26 @@ logger = logging.getLogger(__name__)
 
 class VectorService:
     def __init__(self):
-        self.client = QdrantClient(
-            url=settings.QDRANT_URL,
-            api_key=settings.QDRANT_API_KEY,
-        )
+        # Lazily initialized to avoid network call at import time
+        self.client = None
         # Lazily initialized to avoid blocking app startup on model download.
         self.encoder = None
         self._embedded_threads: set = set()
         self._collection_ready = False
+
+    def _get_client(self):
+        """
+        Lazy-initialize Qdrant client on first use.
+        Avoids blocking Render startup with remote connection validation.
+        """
+        if self.client is None:
+            logger.info("[VectorService] Connecting to Qdrant")
+            self.client = QdrantClient(
+                url=settings.QDRANT_URL,
+                api_key=settings.QDRANT_API_KEY,
+            )
+            logger.info("[VectorService] Connected to Qdrant")
+        return self.client
 
     def _get_encoder(self):
         """
@@ -66,11 +78,11 @@ class VectorService:
 
         existing = [
             c.name
-            for c in self.client.get_collections().collections
+            for c in self._get_client().get_collections().collections
         ]
         if COLLECTION_NAME not in existing:
             logger.info("[VectorService] Creating Qdrant collection '%s'", COLLECTION_NAME)
-            self.client.create_collection(
+            self._get_client().create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(
                     size=VECTOR_DIM,
@@ -78,12 +90,12 @@ class VectorService:
                 ),
             )
             # Create payload indexes for efficient filtering
-            self.client.create_payload_index(
+            self._get_client().create_payload_index(
                 collection_name=COLLECTION_NAME,
                 field_name="thread_id",
                 field_schema="keyword",
             )
-            self.client.create_payload_index(
+            self._get_client().create_payload_index(
                 collection_name=COLLECTION_NAME,
                 field_name="doc_id",
                 field_schema="keyword",
@@ -99,7 +111,7 @@ class VectorService:
         if thread_id in self._embedded_threads:
             return True
         # Cache miss — check Qdrant (network call ~300ms)
-        result = self.client.scroll(
+        result = self._get_client().scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=Filter(
                 must=[
@@ -212,7 +224,7 @@ class VectorService:
             )
 
         # Store in Qdrant (batch upsert)
-        self.client.upsert(
+        self._get_client().upsert(
             collection_name=COLLECTION_NAME,
             points=points,
         )
@@ -248,7 +260,7 @@ class VectorService:
             query_vector = list(encoder.embed([query]))[0].tolist()
 
             # Search Qdrant with thread_id filter
-            results = self.client.search(
+            results = self._get_client().search(
                 collection_name=COLLECTION_NAME,
                 query_vector=query_vector,
                 query_filter=Filter(
@@ -288,7 +300,7 @@ class VectorService:
         Removes vectors from ALL threads of that document.
         Keeps Qdrant free tier storage clean.
         """
-        self.client.delete(
+        self._get_client().delete(
             collection_name=COLLECTION_NAME,
             points_selector=Filter(
                 must=[

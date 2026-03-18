@@ -1,5 +1,6 @@
 import time
 import logging
+import asyncio
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +33,7 @@ async def recover_stuck_documents():
     retry button appears.
     Any background tasks from a previous server process are dead,
     so there's no risk of racing with an active task.
+    Runs in background without blocking startup.
     """
     from sqlalchemy import update as sql_update
     from app.models.models import Document
@@ -57,11 +59,12 @@ async def recover_stuck_documents():
             await db.commit()
             count = result.rowcount
             if count > 0:
-                print(
-                    f"[startup] Recovered {count} stuck document(s)"
+                logger.info(
+                    "[startup] Recovered %d stuck document(s)",
+                    count
                 )
-        except Exception as e:
-            print(f"[startup] Stuck document recovery failed: {e}")
+        except Exception:
+            logger.exception("[startup] Stuck document recovery failed")
 
 
 @app.on_event("startup")
@@ -79,7 +82,8 @@ async def startup():
         logger.warning(
             "cookie config warning: COOKIE_SAMESITE=none with COOKIE_SECURE=false; browsers will reject refresh cookie over HTTPS"
         )
-    await recover_stuck_documents()
+    # Run document recovery in background without blocking startup
+    asyncio.create_task(recover_stuck_documents())
 
 
 @app.middleware("http")
