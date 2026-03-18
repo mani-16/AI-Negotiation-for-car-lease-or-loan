@@ -14,6 +14,7 @@ KEY DESIGN DECISIONS:
 
 import uuid
 import asyncio
+import logging
 from typing import List
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
@@ -30,17 +31,29 @@ CHUNK_SIZE = 500          # chars per chunk
 CHUNK_OVERLAP = 50        # overlap between chunks
 TOP_K = 5                 # number of chunks to retrieve
 
+logger = logging.getLogger(__name__)
+
 class VectorService:
     def __init__(self):
         self.client = QdrantClient(
             url=settings.QDRANT_URL,
             api_key=settings.QDRANT_API_KEY,
         )
-        # Load embedding model once — uses ONNX Runtime (lightweight, no PyTorch)
-        # ~100MB download on first run, then cached locally
-        self.encoder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
-        self._embedded_threads: set = set()  # ADD THIS LINE
-        self._ensure_collection()
+        # Lazily initialized to avoid blocking app startup on model download.
+        self.encoder = None
+        self._embedded_threads: set = set()
+        self._collection_ready = False
+
+    def _get_encoder(self):
+        """
+        Lazy-load the embedding model on first use.
+        This prevents Render startup timeout caused by model fetch at import time.
+        """
+        if self.encoder is None:
+            logger.info("[VectorService] Loading embedding model")
+            self.encoder = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
+            logger.info("[VectorService] Embedding model ready")
+        return self.encoder
 
     def _ensure_collection(self):
         """
@@ -48,11 +61,15 @@ class VectorService:
         Called once on service initialization.
         Safe to call multiple times — checks before creating.
         """
+        if self._collection_ready:
+            return
+
         existing = [
             c.name
             for c in self.client.get_collections().collections
         ]
         if COLLECTION_NAME not in existing:
+            logger.info("[VectorService] Creating Qdrant collection '%s'", COLLECTION_NAME)
             self.client.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(
@@ -71,9 +88,13 @@ class VectorService:
                 field_name="doc_id",
                 field_schema="keyword",
             )
+            logger.info("[VectorService] Qdrant collection '%s' created", COLLECTION_NAME)
+        self._collection_ready = True
 
     # ─── CHECK ───────────────────────────────────────────────
     def vectors_exist_for_thread(self, thread_id: str) -> bool:
+        self._ensure_collection()
+
         # In-memory cache hit — instant (0ms)
         if thread_id in self._embedded_threads:
             return True
@@ -157,15 +178,18 @@ class VectorService:
         """
         # Skip if already embedded for this thread
         if self.vectors_exist_for_thread(thread_id):
+            logger.info("[VectorService] Reusing existing vectors for thread_id=%s", thread_id)
             return
 
         # Chunk the contract text
         chunks = self.chunk_text(text)
         if not chunks:
+            logger.warning("[VectorService] No chunks produced for doc_id=%s thread_id=%s", doc_id, thread_id)
             return
 
         # Embed all chunks in one batch call (faster than one by one)
-        embeddings = list(self.encoder.embed(chunks))
+        encoder = self._get_encoder()
+        embeddings = list(encoder.embed(chunks))
 
         # Build Qdrant points
         points = []
@@ -192,6 +216,12 @@ class VectorService:
             collection_name=COLLECTION_NAME,
             points=points,
         )
+        logger.info(
+            "[VectorService] Stored %d chunks for doc_id=%s thread_id=%s",
+            len(points),
+            doc_id,
+            thread_id,
+        )
         self._embedded_threads.add(thread_id)
 
     # ─── RETRIEVE ────────────────────────────────────────────
@@ -214,7 +244,8 @@ class VectorService:
             self._ensure_collection()
 
             # Embed the user query
-            query_vector = list(self.encoder.embed([query]))[0].tolist()
+            encoder = self._get_encoder()
+            query_vector = list(encoder.embed([query]))[0].tolist()
 
             # Search Qdrant with thread_id filter
             results = self.client.search(
@@ -241,8 +272,8 @@ class VectorService:
                 key=lambda x: x.payload.get("chunk_index", 0)
             )
             return [r.payload["text"] for r in sorted_results]
-        except Exception as e:
-            print(f"[VectorService] Retrieval failed: {e}")
+        except Exception:
+            logger.exception("[VectorService] Retrieval failed")
             return []
 
     def retrieve(self, query: str, thread_id: str, top_k: int = 5) -> list[str]:

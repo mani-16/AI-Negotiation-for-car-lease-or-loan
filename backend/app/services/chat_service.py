@@ -33,6 +33,7 @@ FLOW PER MESSAGE:
 
 import json
 import asyncio
+import logging
 from uuid import UUID
 from langchain_groq import ChatGroq
 from langchain_core.messages import (
@@ -49,6 +50,8 @@ from app.services.llm_logger import (
   log_llm_call, estimate_tokens, LLMCallTimer
 )
 from app.services.document_service import get_document_with_text
+
+logger = logging.getLogger(__name__)
 
 NEGOTIATION_SYSTEM_PROMPT = """
 You are an expert car lease and loan negotiation coach
@@ -193,7 +196,7 @@ async def classify_intent(llm, message: str) -> str:
       return "GENERAL"
     return "DOCUMENT"
   except Exception as e:
-    print(f"[Chat] Intent classification failed: {e}")
+    logger.exception("[Chat] Intent classification failed")
     # Default to DOCUMENT so we never lose contract context
     return "DOCUMENT"
 
@@ -341,15 +344,16 @@ class ChatService:
 
         if is_simple_message(user_message):
           use_rag = False
-          print(f"[Chat] Simple message — skipping RAG")
+          logger.info("[Chat] Simple message detected; skipping RAG")
         else:
           intent = await classify_intent(
             self.classifier_llm, user_message
           )
           use_rag = (intent == "DOCUMENT")
-          print(
-            f"[Chat] Intent={intent} — "
-            f"{'using' if use_rag else 'skipping'} RAG"
+          logger.info(
+            "[Chat] Intent=%s; %s RAG",
+            intent,
+            "using" if use_rag else "skipping",
           )
 
         if use_rag:
@@ -361,8 +365,8 @@ class ChatService:
               doc_id=str(doc_id),
               thread_id=str(thread_id),
             )
-          except Exception as e:
-            print(f"[Chat] Vector init failed: {e}")
+          except Exception:
+            logger.exception("[Chat] Vector initialization failed")
 
           # Retrieve relevant chunks
           try:
@@ -371,8 +375,8 @@ class ChatService:
               thread_id=str(thread_id),
               top_k=5,
             )
-          except Exception as e:
-            print(f"[Chat] Vector retrieval failed: {e}")
+          except Exception:
+            logger.exception("[Chat] Vector retrieval failed")
             chunks = []
 
         # ── STEP D: Get last 10 messages from history ────
