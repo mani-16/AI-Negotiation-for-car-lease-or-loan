@@ -30,6 +30,6 @@
   npm run dev
 
 ## URLs
-  App:      http://localhost:5173
-  API docs: http://localhost:8000/docs
+  Frontend: https://ai-negotiation-for-car-lease-or-loa.vercel.app/ 
+  Backend:https://ai-negotiation-for-car-lease-or-loan-2.onrender.com
 
